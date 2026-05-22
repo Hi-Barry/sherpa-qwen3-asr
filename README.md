@@ -149,6 +149,51 @@ curl http://localhost:8000/v1/models
 
 ---
 
+## 远程调用
+
+项目自带 `scripts/qwen3_client.py`，纯 Python 标准库实现，零依赖，可直接复制到远程机器运行：
+
+```bash
+# 复制到远程机器（只需这一个文件）
+scp scripts/qwen3_client.py user@remote-pc:~/
+
+# 在远程机器上使用
+python3 qwen3_client.py health --server 10.88.88.5:8000
+
+python3 qwen3_client.py transcribe audio.wav --server 10.88.88.5:8000
+
+python3 qwen3_client.py transcribe audio.wav \
+  --server 10.88.88.5:8000 --language Chinese
+
+# OpenAI 兼容接口
+python3 qwen3_client.py openai audio.wav \
+  --server 10.88.88.5:8000 --format verbose_json
+
+python3 qwen3_client.py openai audio.wav \
+  --server 10.88.88.5:8000 --format text
+```
+
+也可在代码中作为库调用：
+
+```python
+from qwen3_client import Qwen3Client
+
+client = Qwen3Client(server="10.88.88.5:8000")
+
+# 健康检查
+print(client.health())
+
+# 识别音频
+result = client.transcribe("audio.wav", language="Chinese")
+print(result["result"]["text"])
+
+# OpenAI 兼容
+text = client.openai_transcribe("audio.wav", response_format="text")
+print(text["text"])
+```
+
+---
+
 ## 配置
 
 编辑 `config/config.yaml`：
