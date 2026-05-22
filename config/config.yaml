@@ -1,0 +1,48 @@
+# sherpa-qwen3-asr Configuration
+# All paths are relative to project root, or absolute
+
+service:
+  host: "0.0.0.0"
+  port: 8000
+
+models:
+  # Qwen3-ASR 0.6B int8 — downloaded by scripts/download_models.sh
+  qwen3_asr_dir: "models/qwen3-asr"
+  # Silero VAD for long audio segmentation (optional)
+  vad_dir: "models/vad"
+  vad_model_file: "silero_vad.onnx"
+
+asr:
+  # Provider: "cpu" for CPU-only, "cuda" for NVIDIA GPU
+  # When "cuda" and CUDA is unavailable, falls back to cpu automatically
+  provider: "cpu"
+  num_threads: 2
+  # Qwen3-ASR offline path uses feature_dim=128 (NOT 80 like SenseVoice/Whisper)
+  feature_dim: 128
+  # Maximum KV cache sequence length
+  max_total_len: 512
+  # Maximum new tokens to generate per utterance
+  max_new_tokens: 128
+  # Sampling parameters (very low temperature = deterministic)
+  temperature: 0.000001  # = 1e-6
+  top_p: 0.8
+  seed: 42
+  # Optional comma-separated hotwords: "foo,bar,baz"
+  hotwords: ""
+
+vad:
+  # Silero VAD — disable for very short audio (<30s) to skip overhead
+  enabled: true
+  threshold: 0.5
+  min_speech_duration: 0.25      # seconds
+  min_silence_duration: 0.25     # seconds
+  max_speech_duration: 30        # max segment length (s) — capped by max_new_tokens
+
+processing:
+  max_file_size: 52428800         # 50 MB max upload
+  max_audio_duration: 3600        # 1 hour max
+  temp_dir: "/tmp/sherpa-qwen3-asr"
+
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

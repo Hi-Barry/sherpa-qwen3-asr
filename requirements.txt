@@ -1,0 +1,23 @@
+# sherpa-qwen3-asr — CPU-only dependencies
+# Pure CPU mode: no GPU needed, works everywhere
+
+# Web framework
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+python-multipart>=0.0.9
+
+# ASR engine (CPU-only, ONNX-based)
+# Requires sherpa-onnx >= 1.12.34 for Qwen3 ASR support
+sherpa-onnx>=1.12.34
+
+# Audio processing
+soundfile>=0.12.1
+librosa>=0.10.0
+numpy>=1.24.0
+
+# Configuration
+pyyaml>=6.0
+
+# Testing
+pytest>=7.0.0
+httpx>=0.27.0

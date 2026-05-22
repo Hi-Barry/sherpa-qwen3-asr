@@ -1,0 +1,31 @@
+# sherpa-qwen3-asr — GPU (CUDA 11.8) dependencies
+#
+# Prerequisites:
+#   1. Install CUDA Toolkit 11.8 + cuDNN 8.x
+#      https://k2-fsa.github.io/k2/installation/cuda-cudnn.html
+#   2. Verify: nvcc --version → should show 11.8
+#
+# Installation:
+#   pip install -r requirements-gpu.txt
+
+# Web framework
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+python-multipart>=0.0.9
+
+# ASR engine (CPU + CUDA 11.8)
+# Installs from sherpa-onnx CUDA 11.8 wheel index
+--find-links https://k2-fsa.github.io/sherpa/onnx/cuda.html
+sherpa-onnx==1.13.2+cuda
+
+# Audio processing
+soundfile>=0.12.1
+librosa>=0.10.0
+numpy>=1.24.0
+
+# Configuration
+pyyaml>=6.0
+
+# Testing
+pytest>=7.0.0
+httpx>=0.27.0
