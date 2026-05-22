@@ -6,27 +6,16 @@ sherpa-qwen3-asr Remote Client
 自包含的 Python 客户端，用于远程调用 sherpa-qwen3-asr API。
 纯标准库，零额外依赖，在远程机器上直接运行。
 
-Usage:
-    # 识别音频
+> ⚠️ 跨平台注意：Linux/macOS 用 python3，Windows 用 python。
+> 虚拟环境（.venv）中 python3 不可用，只识别 python。
+
+Usage (Linux/macOS):
+    python3 qwen3_client.py transcribe audio.wav --server 10.88.88.5:8000
+    python3 qwen3_client.py health --server 10.88.88.5:8000
+
+Usage (Windows PowerShell):
     python qwen3_client.py transcribe audio.wav --server 10.88.88.5:8000
-
-    # 指定语言
-    python qwen3_client.py transcribe audio.wav --server 10.88.88.5:8000 --language Chinese
-
-    # OpenAI 兼容接口
-    python qwen3_client.py openai audio.wav --server 10.88.88.5:8000
-
-    # 详细格式
-    python qwen3_client.py openai audio.wav --server 10.88.88.5:8000 --format verbose_json
-
-    # 纯文本输出
-    python qwen3_client.py openai audio.wav --server 10.88.88.5:8000 --format text
-
-    # 健康检查
     python qwen3_client.py health --server 10.88.88.5:8000
-
-    # 列出可用模型
-    python qwen3_client.py models --server 10.88.88.5:8000
 """
 
 import json

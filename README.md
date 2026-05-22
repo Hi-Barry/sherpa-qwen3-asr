@@ -151,7 +151,9 @@ curl http://localhost:8000/v1/models
 
 ## 远程调用
 
-项目自带 `scripts/qwen3_client.py`，纯 Python 标准库实现，零依赖，可直接复制到远程机器运行：
+项目自带 `scripts/qwen3_client.py`，纯 Python 标准库实现，零依赖，可直接复制到远程机器运行。
+
+> ⚠️ **跨平台注意：** Linux/macOS 用 `python3`，Windows 用 `python`（虚拟环境中 `python3` 不可用，只识别 `python`）。
 
 ```bash
 # 复制到远程机器（只需这一个文件）
