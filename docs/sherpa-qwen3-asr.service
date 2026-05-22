@@ -1,0 +1,37 @@
+[Unit]
+Description=sherpa-qwen3-asr — Qwen3-ASR Speech Recognition API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# 运行用户（建议创建专用用户，不要用 root）
+User=sherpa
+Group=sherpa
+
+# 工作目录
+WorkingDirectory=/home/sherpa/sherpa-qwen3-asr
+
+# 环境变量：指定 Python venv 路径
+Environment=PATH=/home/sherpa/sherpa-qwen3-asr/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=SHERPA_QWEN3_CONFIG=/home/sherpa/sherpa-qwen3-asr/config/config.yaml
+
+# 启动命令
+ExecStart=/home/sherpa/sherpa-qwen3-asr/venv/bin/python -m src.api
+
+# 崩溃后自动重启
+Restart=always
+RestartSec=10
+
+# 日志
+StandardOutput=journal
+StandardError=journal
+
+# 安全加固
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
