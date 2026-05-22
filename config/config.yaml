@@ -14,8 +14,8 @@ models:
 
 asr:
   # Provider: "cpu" for CPU-only, "cuda" for NVIDIA GPU
-  # When "cuda" and CUDA is unavailable, falls back to cpu automatically
-  provider: "cpu"
+  # Switch to "cpu" if using the CPU-only venv (venv/ instead of venv-gpu/)
+  provider: "cuda"
   num_threads: 2
   # Qwen3-ASR offline path uses feature_dim=128 (NOT 80 like SenseVoice/Whisper)
   feature_dim: 128

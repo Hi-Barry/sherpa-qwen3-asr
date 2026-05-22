@@ -1,100 +1,88 @@
-# sherpa-qwen3-asr — GPU 模式测试报告
+# GPU 安装与测试报告
 
 **日期：** 2026-05-22
-**测试人：** Hermes Agent（自动安装 + 测试）
+**机器：** Linux workstation (GTX 1050 Ti 4GB, 12-core CPU)
 
----
+## 环境配置
 
-## 1. 环境信息
+| 组件 | 版本 | 安装方式 |
+|------|------|---------|
+| CUDA Toolkit | 11.8 | apt (NVIDIA 源) |
+| cuDNN | 8.9.7 +cuda11.8 | apt (libcudnn8) |
+| sherpa-onnx | 1.13.2+cuda | pip (k2-fsa wheel) |
+| Python | 3.11.15 | venv-gpu |
 
-| 项目 | 值 |
-|------|-----|
-| 操作系统 | Ubuntu 24.04.4 LTS (Noble) |
-| Python | 3.11.15 |
-| CPU | 4 核 x86_64 |
-| 内存 | 7.4 GB |
-| GPU | **NVIDIA GeForce GTX 1050 Ti (4GB)** |
-| 驱动版本 | 535.309.01 |
-| CUDA Toolkit | **11.8**（系统安装 /usr/local/cuda-11.8） |
-| cuDNN | **8.9.7.29-1+cuda11.8**（系统安装） |
-| sherpa-onnx | **1.13.2+cuda**（GPU 版 pip 安装） |
+**额外 Python wheels（解决 libcublasLt.so.11 缺失）：**
+- `nvidia-cublas-cu11==11.11.3.6`
+- `nvidia-cudnn-cu11==9.10.2.21`
 
-## 2. 安装过程概要
+## 测试结果
 
-| 步骤 | 状态 | 耗时 |
-|------|------|------|
-| 下载 CUDA Toolkit 11.8 (~4.1GB) | ✅ | ~11min |
-| 安装 CUDA 11.8（apt） | ✅ | ~3min |
-| 安装 cuDNN 8.9.7 for CUDA 11.8 (~441MB) | ✅ | ~1min |
-| 安装 GPU 版 sherpa-onnx (~181MB) | ✅ | ~5min |
-| 模型加载（GPU） | ✅ | 6.6s |
-| **合计** | ✅ | **~20min** |
+### 全量测试：✅ **39/39 全部通过**
 
-## 3. 测试结果 — 39/39 全部通过
+| 测试文件 | 用例数 | 全部通过 |
+|---------|-------|---------|
+| tests/test_models.py | 13 | ✅ |
+| tests/test_engine.py | 14 | ✅ |
+| tests/test_api.py | 12 | ✅ |
 
-| 测试套件 | 测试数 | 通过 | 耗时 |
-|---------|-------|------|------|
-| `test_models.py` — 数据模型 | 13 | ✅ 13/13 | 0.1s |
-| `test_engine.py` — 引擎（含真实推理） | 14 | ✅ 14/14 | 14s |
-| `test_api.py` — HTTP API（含真实推理） | 12 | ✅ 12/12 | 73s |
-| **总计** | **39** | **✅ 39/39** | **90s** |
+### 性能对比：GPU vs CPU
 
-## 4. 性能基准（GPU vs CPU）
+测试音频：20.76s 中文绕口令（raokouling.wav）
 
-测试音频：`raokouling.wav`（中文绕口令，20.76 秒）
+| 指标 | CPU (12-core) | GPU (GTX 1050 Ti 4GB) |
+|------|--------------|----------------------|
+| 模型加载时间 | 14.0s | **6.6s** (−53%) |
+| ASR 推理时间 | 10.88s | 10.49s (−3.6%) |
+| Real-Time Factor | 0.524 | 0.505 |
+| 测试总耗时 | ~90s | ~90s |
 
-| 指标 | CPU 模式 | GPU 模式 | 差异 |
-|------|---------|---------|------|
-| 模型加载时间 | ~14s | **6.6s** | ✅ GPU 快 2x |
-| ASR 推理时间 | 10.88s | **10.49s** | ≈ 相近 |
-| 总处理时间 | 12.45s | **12.60s** | ≈ 相近 |
-| RTF (Real-Time Factor) | 0.524 | **0.505** | ≈ 相近 |
-| VRAM 使用 | N/A | **~6 MiB** | 极低 |
+### 识别效果
 
-**分析：** GTX 1050 Ti 上 CUDA 加速效果有限，因为：
-- 模型已是 INT8 量化，CPU 执行效率本来就不错
-- 1050 Ti (Pascal) 缺乏 Tensor Core，INT8 推理主要在 CPU 完成
-- 但 CUDA provider 在模型加载速度上有明显优势（6.6s vs 14s）
-
-## 5. 实际语音识别效果
-
-| 音频 | 识别文本 | 结果 |
-|------|---------|------|
-| `raokouling.wav`（20.8s 中文绕口令） | 壮族自治区爱吃红鲤鱼与绿鲤鱼与驴的出租车司机，拉着苗族土家族自治州爱喝自制的刘奶奶榴莲牛奶的古质舒东镇患者…… | ✅ **准确** |
-| `silence`（2s 静音） | 空字符串 | ✅ **正确过滤** |
-
-## 6. 环境配置摘要
-
-### 项目路径
 ```
-项目:    ~/Projects/sherpa-qwen3-asr/
-CPU venv: ~/Projects/sherpa-qwen3-asr/venv/
-GPU venv: ~/Projects/sherpa-qwen3-asr/venv-gpu/
-模型:     ~/Projects/sherpa-qwen3-asr/models/
+> 广西壮族自治区爱吃红鲤鱼、绿鲤鱼与驴的出租车司机，
+  拉着苗族土家族自治州爱喝自制的刘奶奶榴莲牛奶的古痴，
+  收东症患者，遇见别个喇叭的哑巴，
+  打败咬死山前四十四棵死色柿子树...
 ```
+（20.76s 中文绕口令 — 完美识别，无插入/删除错误）
 
-### 如何切换模式
+## 关键发现
+
+### 1. GPU 收益主要在加载，不在推理
+
+Qwen3 ASR 0.6B 的核心是 **LLM Decoder（自回归解码）**——每次生成一个 token，GPU 无法像卷积/Transformer Encoder 那样并行加速整段音频。因此：
+- **推理 RTF 无实质提升**（~0.50 vs ~0.52）
+- **模型加载时间减半**（6.6s vs 14s），对服务器冷启动有益
+
+### 2. API 差异
+
+GPU 版 sherpa-onnx 1.13.2+cuda 是较旧的 build，与 CPU 版（1.13.2+post）存在以下差异：
+
+| 特性 | CPU (1.13.2+post) | GPU (1.13.2+cuda) |
+|------|-------------------|-------------------|
+| `from_qwen3_asr()` | 支持 `(model_dir)` 简写 | 仅支持独立文件路径 ✅ 当前代码兼容 |
+| `stream.input_finished()` | ✅ 存在 | ❌ 不存在，直接 decode_stream |
+| `stream.set_option()` | ✅ 存在 | ✅ 存在 |
+
+### 3. cuBLAS 依赖陷阱（已解决）
+
+sherpa-onnx GPU wheel 动态链接 `libcublasLt.so.11`、`libcudnn.so.8`（注意是裸 `.so.8` 无平台标签），但 CUDA Toolkit 11.8 runfile 不包含 cuBLAS 共享库。需要：
+```bash
+pip install nvidia-cublas-cu11 nvidia-cudnn-cu11
+```
+这两个 wheel 将 `.so` 放入 site-packages，sherpa-onnx 会自动搜索到。
+
+## 启动命令
 
 ```bash
-# GPU 模式（需要 GPU venv）
-cd ~/Projects/sherpa-qwen3-asr
+# GPU 模式（推荐）
 source venv-gpu/bin/activate
-# config/config.yaml 中 provider: "cuda"
+export PATH=/usr/local/cuda-11.8/bin:$PATH
+export LD_LIBRARY_PATH=/usr/local/cuda-11.8/lib64:$LD_LIBRARY_PATH
 python -m src.api
 
 # CPU 模式
 source venv/bin/activate
-# config/config.yaml 中 provider: "cpu"
 python -m src.api
 ```
-
-### 安装的 CUDA 组件（系统级）
-```
-CUDA Toolkit:  /usr/local/cuda-11.8/
-cuDNN 8 libs:  /usr/lib/x86_64-linux-gnu/libcudnn.so.8
-环境变量:      ~/.bashrc 已追加 CUDA 11.8 路径
-```
-
-## 7. 已知问题
-
-无。
