@@ -1,106 +1,83 @@
-# CUDA 11.8 + cuDNN 8 安装指南（无 sudo 权限版）
+# CUDA 11.8 + cuDNN 8 安装指南（apt 版）
 
-## 环境信息
-
-| 项目 | 值 |
-|------|-----|
-| GPU | NVIDIA GeForce GTX 1050 Ti (4GB) |
-| 驱动版本 | 535.309.01 |
-| 当前 CUDA 驱动支持 | 12.2 |
-| 目标 CUDA Toolkit | **11.8**（兼容当前驱动） |
-| 目标 cuDNN | **8.9.x for CUDA 11.x** |
+> 📍 **本机已验证环境：** GTX 1050 Ti 4GB | 驱动 535.309.01
+>
+> 这是实际安装成功的步骤记录，包含所有踩坑和解决方案。
 
 ---
 
-## 第一步：下载 CUDA Toolkit 11.8
+## 环境检查
 
 ```bash
-cd ~/Downloads
+nvidia-smi
+```
 
-# 下载 CUDA 11.8 runfile（约 3.2GB）
-wget https://developer.download.nvidia.com/compute/cuda/11.8.0/local_installers/cuda_11.8.0_520.61.05_linux.run
+确认输出：
+- **Driver Version** ≥ 520.61.05（CUDA 11.8 的最低要求）
+- 当前驱动支持 CUDA 12.x runtime 也没关系，CUDA Toolkit 11.8 可以兼容安装
 
-# 如 wget 慢，可用 curl
-# curl -L -o cuda_11.8.0_520.61.05_linux.run \
-#   https://developer.download.nvidia.com/compute/cuda/11.8.0/local_installers/cuda_11.8.0_520.61.05_linux.run
+> ⚠️ **不要用 runfile 安装！** 实际测试发现 runfile 安装到 `~/cuda/` 后，sherpa-onnx GPU wheel 找不到 `libcublasLt.so.11`（cuBLAS 不在 CUDA Toolkit 中）。**推荐用 apt 方式安装。**
+
+---
+
+## 第一步：添加 NVIDIA apt 源
+
+```bash
+# 添加 NVIDIA CUDA apt 仓库
+wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
+sudo dpkg -i cuda-keyring_1.1-1_all.deb
+sudo apt update
 ```
 
 ---
 
-## 第二步：安装 CUDA Toolkit（无 sudo 模式）
+## 第二步：安装 CUDA Toolkit 11.8
 
 ```bash
-chmod +x cuda_11.8.0_520.61.05_linux.run
-
-# 只解压（不安装驱动），安装到 ~/cuda/
-./cuda_11.8.0_520.61.05_linux.run --toolkit --silent \
-  --toolkitpath=$HOME/cuda/ \
-  --no-opengl-libs --no-man-page
+# 安装 CUDA 11.8 Toolkit（不装驱动，用系统已有驱动）
+sudo apt install cuda-toolkit-11-8
 ```
 
-> ⚠️ 注意：**不要勾选 Driver**（你的驱动 535 已经比 520 新）
-> 如果出现交互界面，取消勾选 "Driver"，只保留 "CUDA Toolkit 11.8"
+> ⚠️ **版本锁定：** NVIDIA apt 源还有其他 CUDA 版本（如 12.x），务必指定 `cuda-toolkit-11-8` 而不是 `cuda-toolkit`，否则会装最新版。
+>
+> 安装位置：`/usr/local/cuda-11.8/`
 
 ---
 
-## 第三步：设置环境变量
-
-将以下内容追加到 `~/.bashrc`：
+## 第三步：安装 cuDNN 8.9 for CUDA 11.8
 
 ```bash
-# CUDA 11.8 （自定义安装路径）
-export PATH=$HOME/cuda/bin:$PATH
-export LD_LIBRARY_PATH=$HOME/cuda/lib64:$LD_LIBRARY_PATH
-export CUDA_HOME=$HOME/cuda
+# 查看可用的 cuDNN 版本
+apt-cache policy libcudnn8
+
+# 安装 cuDNN 8.9 对应 CUDA 11.8 的版本
+sudo apt install libcudnn8=8.9.7.*+cuda11.8
 ```
 
-然后生效：
+> ⚠️ **版本坑：** 不加版本号会装 cuDNN for CUDA 12.x（依赖 CUDA 12 runtime，与 CUDA 11.8 不兼容）。
+>
+> 安装位置：`/usr/lib/x86_64-linux-gnu/libcudnn.so.8`
+
+---
+
+## 第四步：设置环境变量
+
+追加到 `~/.bashrc`：
+
+```bash
+# CUDA 11.8
+export PATH=/usr/local/cuda-11.8/bin:$PATH
+export LD_LIBRARY_PATH=/usr/local/cuda-11.8/lib64:$LD_LIBRARY_PATH
+export CUDA_HOME=/usr/local/cuda-11.8
+```
+
+生效并验证：
 
 ```bash
 source ~/.bashrc
-
-# 验证
 nvcc --version
 # 应输出: Cuda compilation tools, release 11.8, V11.8.89
 ```
-
----
-
-## 第四步：下载并安装 cuDNN 8.9 for CUDA 11.x
-
-cuDNN 需要从 NVIDIA Developer 网站下载（需免费注册账号）。
-
-**方法 A — 手动下载（推荐）：**
-
-1. 访问 https://developer.nvidia.com/cudnn
-2. 注册/登录 NVIDIA Developer 账号
-3. 下载 **cuDNN for CUDA 11.x** → **Local Installer for Linux x86_64 (Tar)**
-   - 文件名类似 `cudnn-linux-x86_64-8.9.7.29_cuda11-archive.tar.xz`
-4. 解压并复制到 CUDA 目录：
-
-```bash
-tar -xvf cudnn-linux-x86_64-8.9.7.29_cuda11-archive.tar.xz
-
-# 复制到自定义 CUDA 目录
-cp cudnn-linux-x86_64-8.9.7.29_cuda11-archive/include/cudnn*.h $HOME/cuda/include/
-cp -P cudnn-linux-x86_64-8.9.7.29_cuda11-archive/lib/libcudnn* $HOME/cuda/lib64/
-
-# 设置权限
-chmod a+r $HOME/cuda/include/cudnn*.h $HOME/cuda/lib64/libcudnn*
-
-# 验证
-cat $HOME/cuda/include/cudnn_version.h | grep CUDNN_MAJOR -A 2
-```
-
-**方法 B — 用 pip 安装（无需注册，推荐的替代方案）：**
-
-```bash
-# Python 版的 cuDNN 封装 — sherpa-onnx 可能需要
-pip install nvidia-cudnn-cu11
-```
-
-> 注：sherpa-onnx 的 CUDA 版 wheel 已内嵌 ONNX Runtime 所需依赖，
-> 部分功能可能不需要手动装 cuDNN。
 
 ---
 
@@ -109,91 +86,137 @@ pip install nvidia-cudnn-cu11
 ```bash
 cd ~/Projects/sherpa-qwen3-asr
 
-# 确保 CUDA 环境变量在当前 shell 生效
-source ~/.bashrc
-which nvcc  # 应显示 ~/cuda/bin/nvcc
-
-# 创建新 venv（或复用现有的）
+# 创建 GPU 专用虚拟环境
 deactivate 2>/dev/null
-rm -rf venv-gpu
 python3 -m venv venv-gpu
 source venv-gpu/bin/activate
 
-# 安装 GPU 版依赖
-# ⚠️ 先注释掉 requirements.txt 中的 sherpa-onnx 行
-# 然后安装 GPU 版
+# 升级 pip
 pip install --upgrade pip
+
+# ⚠️ 需要代理（如国内网络）：
+# export http_proxy=socks5://10.88.88.3:10808
+# export https_proxy=socks5://10.88.88.3:10808
+
+# 安装 GPU 版 sherpa-onnx 1.13.2+cuda
 pip install sherpa-onnx==1.13.2+cuda \
   -f https://k2-fsa.github.io/sherpa/onnx/cuda.html
 
 # 安装其他依赖
-pip install fastapi uvicorn[standard] python-multipart soundfile librosa pyyaml
+pip install fastapi uvicorn[standard] python-multipart \
+  soundfile librosa pyyaml
+
+# 安装 cuBLAS + cuDNN Python wheels（关键！）
+pip install nvidia-cublas-cu11 nvidia-cudnn-cu11
 ```
+
+> ⚠️ **巨坑！libcublasLt.so.11 找不到**
+>
+> sherpa-onnx GPU wheel 链接了 `libcublasLt.so.11`，但 CUDA Toolkit 11.8 和 cuDNN apt 包**都不包含 cuBLAS 共享库**。必须通过 pip 安装：
+> - `nvidia-cublas-cu11` — 提供 `libcublasLt.so.11`
+> - `nvidia-cudnn-cu11` — 提供 `libcudnn.so.8`
+>
+> 这两个 wheel 会把 `.so` 文件放入 site-packages，sherpa-onnx 运行时自动搜索到。
 
 ---
 
 ## 第六步：验证 GPU 可用
 
 ```bash
+source venv-gpu/bin/activate
+export PATH=/usr/local/cuda-11.8/bin:$PATH
+export LD_LIBRARY_PATH=/usr/local/cuda-11.8/lib64:$LD_LIBRARY_PATH
+
 python -c "
 import sherpa_onnx
-print('sherpa-onnx:', sherpa_onnx.__version__)
-# 尝试创建 Qwen3 recognizer 使用 GPU
-from pathlib import Path
-import yaml
 
-config = yaml.safe_load(open('config/config.yaml'))
-config['asr']['provider'] = 'cuda'
-config['models']['qwen3_asr_dir'] = str(Path('models/qwen3-asr').resolve())
+model_dir = '/home/barry/Projects/sherpa-qwen3-asr/models/qwen3-asr'
+recognizer = sherpa_onnx.OfflineRecognizer.from_qwen3_asr(
+    conv_frontend=f'{model_dir}/conv_frontend.onnx',
+    encoder=f'{model_dir}/encoder.int8.onnx',
+    decoder=f'{model_dir}/decoder.int8.onnx',
+    tokenizer=f'{model_dir}/tokenizer',
+    provider='cuda',
+    num_threads=4,
+)
+print('✅ GPU recognizer loaded OK')
 
-from src.engine import SpeechEngine
-engine = SpeechEngine(config)
-print('GPU provider:', engine.provider)
-print('Ready:', engine.is_ready)
+import soundfile as sf
+audio, sr = sf.read(f'{model_dir}/test_wavs/raokouling.wav')
+stream = recognizer.create_stream()
+stream.accept_waveform(sr, audio)
+recognizer.decode_stream(stream)
+result = stream.result.text
+print(f'✅ ASR: {result[:80]}...')
+print(f'sherpa-onnx version: {sherpa_onnx.__version__}')
 "
 ```
 
-如果成功输出 `GPU provider: cuda`，说明 GPU 模式已生效。
+成功输出表示 GPU 模式已生效。
 
 ---
 
 ## 第七步：启动 GPU 版服务
 
 ```bash
-# 方式 1：直接用 python 启动（默认使用 config.yaml 中的 provider）
-source venv-gpu/bin/activate
+source ~/Projects/sherpa-qwen3-asr/venv-gpu/bin/activate
+export PATH=/usr/local/cuda-11.8/bin:$PATH
+export LD_LIBRARY_PATH=/usr/local/cuda-11.8/lib64:$LD_LIBRARY_PATH
 python -m src.api
-
-# 方式 2：用 uvicorn 启动
-# uvicorn src.api:app --host 0.0.0.0 --port 8000
 ```
+
+配置文件中 `provider: "cuda"` 已设为默认。
+
+> ⚠️ 每次新开终端都要重新设置环境变量（PATH / LD_LIBRARY_PATH），建议加到 `~/.bashrc`。
+
+---
+
+## 性能说明
+
+| 指标 | CPU (12-core) | GPU (GTX 1050 Ti 4GB) |
+|------|--------------|----------------------|
+| 模型加载 | 14.0s | **6.6s** (−53%) |
+| ASR 推理 RTF | 0.524 | 0.505 |
+| 测试全量 (39 tests) | ~90s | ~90s |
+
+> Qwen3 ASR 0.6B 的核心是 **LLM Decoder（自回归解码）**——每次生成一个 token，GPU 无法像 Encoder 那样并行加速整段音频。因此推理速度提升有限，但**模型加载时间减半**。
 
 ---
 
 ## 常见问题
 
-### Q: 出现 `CUDA driver is insufficient` 错误
-原因：驱动版本不匹配。当前驱动 535 支持 CUDA 12.2 runtime，
-但 CUDA 11.8 toolkit 要求驱动 >= 520.61.05。你的驱动满足要求。
-如果仍有问题，尝试：
+### Q: 出现 `libcublasLt.so.11: cannot open shared object file`
+**原因：** cuBLAS 共享库缺失。
+**解决：** 在 venv-gpu 中运行：
+```bash
+pip install nvidia-cublas-cu11 nvidia-cudnn-cu11
+```
+
+### Q: 出现 `libcudnn.so.8: cannot open shared object file`
+**原因：** cuDNN 共享库缺失。
+**解决：** 同上，或确认 `libcudnn8=8.9.7.*+cuda11.8` 已正确安装。
+
+### Q: 出现 `CUDA driver is insufficient`
+**原因：** 环境变量未正确设置。
+**解决：**
 ```bash
 export CUDA_VISIBLE_DEVICES=0
+export PATH=/usr/local/cuda-11.8/bin:$PATH
+export LD_LIBRARY_PATH=/usr/local/cuda-11.8/lib64:$LD_LIBRARY_PATH
 ```
 
-### Q: 出现 `libcudart.so.11.0: cannot open shared object file`
-原因：LD_LIBRARY_PATH 没设置对。检查：
+### Q: 如何切回 CPU 模式？
 ```bash
-echo $LD_LIBRARY_PATH
-ls $HOME/cuda/lib64/libcuda*  # 应该能看到文件
+# 1. 切换到 CPU venv
+source venv/bin/activate
+# 2. 修改 config.yaml 中 provider: "cpu"
 ```
 
-### Q: 4GB VRAM 够用吗？
-Qwen3-ASR 0.6B int8 模型约 1.5GB，加上 ONNX Runtime 开销，
-总共约 2-2.5GB VRAM。GTX 1050 Ti 的 4GB **完全够用**。
-
-### Q: 还是报错，想切回 CPU 模式
-把 `config/config.yaml` 中的 `provider` 改回 `"cpu"` 即可。
-两个模式可以随时切换。
+### Q: GPU API 和 CPU API 有什么区别？
+GPU 版 sherpa-onnx 1.13.2+cuda 是较早的 build，存在以下差异：
+- `from_qwen3_asr()` 只接受独立文件路径，不接受目录简写（当前代码兼容）
+- OfflineStream **没有** `input_finished()` 方法，直接 `accept_waveform()` 后 `decode_stream()`（当前代码兼容）
+- OfflineStream 有 `set_option("language", ...)`（兼容）
 
 ---
 
@@ -202,4 +225,3 @@ Qwen3-ASR 0.6B int8 模型约 1.5GB，加上 ONNX Runtime 开销，
 - [sherpa-onnx 官方 CUDA 安装文档](https://k2-fsa.github.io/sherpa/onnx/python/install.html#method-2-from-pre-compiled-wheels-cpu-cuda-11-8)
 - [CUDA Toolkit 11.8 下载](https://developer.nvidia.com/cuda-11-8-0-download-archive)
 - [cuDNN 下载](https://developer.nvidia.com/cudnn)
-- [K2 CUDA 安装指南](https://k2-fsa.github.io/k2/installation/cuda-cudnn.html)
