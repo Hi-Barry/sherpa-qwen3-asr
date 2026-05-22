@@ -13,7 +13,8 @@ Group=sherpa
 # 工作目录
 WorkingDirectory=/home/sherpa/sherpa-qwen3-asr
 
-# 环境变量：指定 Python venv 路径
+# 环境变量：激活 Python venv（含 VIRTUAL_ENV + PATH）
+Environment=VIRTUAL_ENV=/home/sherpa/sherpa-qwen3-asr/venv
 Environment=PATH=/home/sherpa/sherpa-qwen3-asr/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=SHERPA_QWEN3_CONFIG=/home/sherpa/sherpa-qwen3-asr/config/config.yaml
 

@@ -161,6 +161,8 @@ User=sherpa
 Group=sherpa
 WorkingDirectory=/home/sherpa/sherpa-qwen3-asr
 Environment=PATH=/home/sherpa/sherpa-qwen3-asr/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=VIRTUAL_ENV=/home/sherpa/sherpa-qwen3-asr/venv
+Environment=SHERPA_QWEN3_CONFIG=/home/sherpa/sherpa-qwen3-asr/config/config.yaml
 ExecStart=/home/sherpa/sherpa-qwen3-asr/venv/bin/python -m src.api
 Restart=always
 RestartSec=10
