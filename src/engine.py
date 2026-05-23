@@ -11,6 +11,10 @@ Architecture:
 import logging
 import time
 import threading
+import subprocess
+import tempfile
+import os
+import atexit
 from pathlib import Path
 from typing import Optional, List, Tuple
 
@@ -146,14 +150,33 @@ class SpeechEngine:
     # Audio I/O
     # ------------------------------------------------------------------
 
+    # ---- Formats that soundfile natively supports ----
+    _SF_FORMATS = frozenset({".wav", ".flac", ".ogg", ".aiff", ".w64", ".caf"})
+
     @staticmethod
     def load_audio(audio_path: str) -> Tuple[np.ndarray, int]:
         """
         Load and normalize audio to 16kHz mono float32.
 
+        Uses soundfile for natively supported formats (wav/flac/ogg).
+        Falls back to ffmpeg for M4A, AAC, MP3, OPUS, WEBM and other
+        formats that libsndfile cannot decode.
+
         Returns:
             (samples, sample_rate) — always 16000 Hz.
         """
+        ext = Path(audio_path).suffix.lower()
+
+        # If soundfile doesn't support this format, use ffmpeg to
+        # decode to a temporary WAV first
+        if ext not in SpeechEngine._SF_FORMATS:
+            try:
+                audio_path = SpeechEngine._ffmpeg_decode(audio_path)
+            except (subprocess.CalledProcessError, FileNotFoundError) as e:
+                raise RuntimeError(
+                    f"Failed to decode audio file: {e}"
+                ) from e
+
         try:
             audio, sr = sf.read(audio_path, dtype="float32")
         except sf.LibsndfileError as e:
@@ -174,6 +197,41 @@ class SpeechEngine:
 
         audio = audio.astype(np.float32)
         return audio, TARGET_SAMPLE_RATE
+
+    @staticmethod
+    def _ffmpeg_decode(audio_path: str) -> str:
+        """
+        Decode audio to WAV using ffmpeg.
+
+        M4A/AAC/MP3/OPUS/WEBM are not natively supported by soundfile
+        (libsndfile), so we delegate decoding to ffmpeg which handles
+        virtually all audio formats.
+
+        Returns:
+            Path to a temporary WAV file (caller should clean up).
+        """
+        temp = tempfile.NamedTemporaryFile(
+            suffix=".wav", prefix="sherpa_decode_", delete=False
+        )
+        temp_path = temp.name
+        temp.close()
+
+        # ffmpeg: decode to 16kHz mono 16-bit PCM WAV
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", audio_path,
+            "-ar", str(TARGET_SAMPLE_RATE),
+            "-ac", "1",
+            "-sample_fmt", "s16",
+            "-f", "wav",
+            temp_path,
+        ]
+        subprocess.run(cmd, check=True, capture_output=True, timeout=120)
+
+        # Schedule cleanup of the temp file on exit
+        atexit.register(lambda p=temp_path: os.unlink(p) if os.path.exists(p) else None)
+
+        return temp_path
 
     # ------------------------------------------------------------------
     # Core Processing
