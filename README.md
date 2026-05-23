@@ -20,6 +20,7 @@
 | **热词 (Hotwords)** | 支持热词偏置，提升特定词汇识别率 |
 | **语言强制** | 可指定语言（如 `"Korean"`, `"Chinese"`） |
 | **OpenAI 兼容** | 兼容 OpenAI Whisper API 调用方式 |
+| **全格式解码** | 内置 ffmpeg 回退 — 支持 M4A/AAC/MP3/OPUS/WEBM 等
 
 ---
 
@@ -33,6 +34,7 @@
 | 磁盘 | 2 GB（模型 ~1.5 GB） | 2 GB |
 | NVIDIA GPU | — | GTX 1050 Ti 4GB+ |
 | CUDA Toolkit | — | **11.8** + cuDNN 8 |
+| **ffmpeg** | ✅ 推荐 | ✅ 推荐 |
 
 ---
 
