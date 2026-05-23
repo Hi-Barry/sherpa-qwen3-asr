@@ -67,3 +67,29 @@ GPU 版 sherpa-onnx 1.13.2+cuda 与 CPU 版 1.13.2 存在 API 差异：
 1. **CUDA 版本冲突** — NVIDIA apt 源默认到 CUDA 12.x，需用 `cuda-11-8` 指定版本且要添加 `cuda11.8` pin 优先级
 2. **cuDNN 版本不匹配** — apt 安装的 `libcudnn8` 默认也装 12.x 版，需 `apt-cache policy libcudnn8` 找到 cuDNN 8 的 CUDA 11.8 专用包
 3. **libcublasLt.so.11 找不到** — sherpa-onnx 1.13.2+cuda 内部调 `libcublasLt.so.11`，但 CUDA 11.8 toolkit 和 cuDNN apt 包不包含 cuBLAS。解决方案：`pip install nvidia-cublas-cu11 nvidia-cudnn-cu11`，这两个 wheel 自带 libcublasLt.so.11
+
+---
+
+## v0.1.1 (2026-05-23)
+
+### 做了什么
+
+修复 M4A/AAC/MP3/OPUS/WEBM 等格式的解码失败问题。
+
+### 根因
+
+`engine.py` 的 `load_audio()` 使用 `soundfile`（libsndfile）解码音频文件。但 libsndfile 不支持 M4A、AAC、MP3、OPUS、WEBM 等常见压缩音频格式。当 LiveSpeaker Android App 上传 M4A 录音文件时，服务端返回 `Failed to decode audio file` 错误。
+
+### 修复
+
+添加 `_ffmpeg_decode()` 静态方法 — 当文件扩展名不在 soundfile 原生支持列表（wav/flac/ogg/aiff/w64/caf）时，自动调用 ffmpeg 解码为 16kHz mono WAV 临时文件，再交由 soundfile 读取。
+
+### 改动
+
+| 文件 | 改动 |
+|------|------|
+| `src/engine.py` | +58 行 — 新增 `_SF_FORMATS`、`_ffmpeg_decode()`、修改 `load_audio()` 增加 ffmpeg fallback |
+
+### 依赖
+
+- 需要 `ffmpeg` 命令（Ubuntu 下系统自带，无需额外 pip 包）
