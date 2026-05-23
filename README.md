@@ -244,6 +244,79 @@ docker run -d --name sherpa-qwen3-asr \
 
 ---
 
+## HTTPS 反向代理
+
+使用 nginx 通过子域名提供 HTTPS 访问，适合与 Android App 搭配使用（Android 9+ 默认阻止 HTTP 明文）。
+
+### 前提
+
+- 在 nginx 所在机器上已通过 certbot 申请 SSL 证书（`asr.purplelin.com`）
+- sherpa-qwen3-asr 服务运行在 `localhost:8000`
+
+### nginx 配置
+
+创建 `/etc/nginx/conf.d/asr.purplelin.com.conf`：
+
+```nginx
+server {
+    listen 80;
+    server_name asr.purplelin.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name asr.purplelin.com;
+
+    # SSL 证书 — certbot 自动填充
+    ssl_certificate /etc/letsencrypt/live/asr.purplelin.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/asr.purplelin.com/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    # 长音频文件可达 100MB+
+    client_max_body_size 100m;
+
+    # ASR 处理长音频可能耗时数分钟
+    proxy_read_timeout 300s;
+    proxy_send_timeout 300s;
+
+    # 禁用缓冲，避免流式响应延迟
+    proxy_buffering off;
+
+    location / {
+        proxy_pass http://localhost:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+### 部署步骤
+
+```bash
+# 1. 申请证书
+sudo certbot --nginx -d asr.purplelin.com
+
+# 2. 写入配置（替换 certbot 生成的初始配置）
+sudo nano /etc/nginx/conf.d/asr.purplelin.com.conf
+
+# 3. 测试并重载
+sudo nginx -t && sudo systemctl reload nginx
+
+# 4. 验证
+curl https://asr.purplelin.com/api/v1/health
+```
+
+| 参数 | 值 | 原因 |
+|------|-----|------|
+| `client_max_body_size` | **100m** | 长录音文件可能 50MB+ |
+| `proxy_read_timeout` | **300s** | ASR 处理长音频可达数分钟 |
+
+---
+
 ## 测试
 
 ```bash
