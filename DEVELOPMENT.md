@@ -93,3 +93,65 @@ GPU 版 sherpa-onnx 1.13.2+cuda 与 CPU 版 1.13.2 存在 API 差异：
 ### 依赖
 
 - 需要 `ffmpeg` 命令（Ubuntu 下系统自带，无需额外 pip 包）
+
+---
+
+## v0.1.2 (2026-05-23) — 长音频切分 + 预处理 + VAD 修复
+
+### 背景
+
+用户反馈 10 分钟录音经常超时/报错，且识别效果不好。
+
+### 根因分析（三个核心问题）
+
+1. **`max_total_len=512` 限制了模型处理能力** — Qwen3-ASR conv_frontend stride=4，每帧≈40ms，512 帧只能覆盖 ~20 秒音频。10 分钟音频送入模型直接导致 KV cache 溢出。
+2. **VAD 无法切分连续语音** — 当用户持续说话（演讲/独白），Silero VAD 检测不到 >250ms 静音，整段 10 分钟作为**一个片段**送入 ASR → 崩溃。
+3. **VAD 实例状态跨请求污染** — 同一个 `VoiceActivityDetector` 实例被所有请求复用，内部状态机残留导致第二个音频的开头切分偏移。
+
+### 修复方案
+
+#### a) 强制子切片（P0 — 根因修复）
+
+新增 `_chunk_segments()` 方法，在 VAD 切分后加一道**强制上限**：
+
+```
+VAD → 按静音切分 → 强制 30s 子切片 → 逐段 ASR → 合并结果
+```
+
+若 VAD 片段 > 30s，自动均匀拆分为 N 段，每段 ≤ 30s。每段独立送 ASR，按时间顺序合并文本。
+
+#### b) 增加模型上下文窗口（P0）
+
+`max_total_len: 512 → 2048`（覆盖 ~82s 音频，远超 30s 切片上限）
+`max_new_tokens: 128 → 256`（支持更长句子）
+
+#### c) VAD 每请求重建（P0 — 状态污染修复）
+
+移除单例 VAD 实例。`_init_vad()` 只存储配置，`_get_speech_segments()` 每次通过 `_create_vad_instance()` 创建新实例。
+
+#### d) 音频预处理（P1 — 提升识别质量）
+
+```
+音量归一化 → max(abs(audio)) 归一化到 [-1.0, 1.0]
+高通滤波 → 4 阶 Butterworth 80Hz 高通（去除机房风扇/空调低频噪声）
+```
+
+#### e) 优化 VAD 参数
+
+| 参数 | 旧值 | 新值 | 原因 |
+|------|------|------|------|
+| `threshold` | 0.5 | 0.3 | 嘈杂环境（机房）降低检测门槛 |
+| `min_silence_duration` | 0.25 | 1.0 | 用 1 秒静音认句子边界，避免频繁切分 |
+| `min_speech_duration` | 0.25 | 0.5 | 过滤 >500ms 的短噪声 |
+
+### 改动量
+
+| 文件 | 改动 |
+|------|------|
+| `config/config.yaml` | 修改 ASR/VAD 参数，新增 processing.preprocess 段落 |
+| `src/engine.py` | 新增 `_preprocess()`、`_chunk_segments()`、`_create_vad_instance()`；重构 `_init_vad()` |
+| `README.md` | 更新特性表和配置示例 |
+
+### 验证
+
+- 24 个核心单元测试通过 ✅（15 个 GPU 集成测试因 CUDA OOM 跳过，与环境有关）

@@ -75,7 +75,7 @@ app = FastAPI(
         "Powered by Qwen3-ASR 0.6B int8 (ONNX) + sherpa-onnx. "
         "Supports 52 languages, pure CPU or GPU inference."
     ),
-    version="0.1.0",
+    version="0.1.2",
     lifespan=lifespan,
 )
 

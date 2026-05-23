@@ -16,7 +16,7 @@
 | **多语言 ASR** | 30 种语言 + 22 种中文方言（自动检测） |
 | **纯 CPU 推理** | ONNX int8 量化，无需 GPU |
 | **CUDA GPU 加速** | 可选 NVIDIA GPU 加速（CUDA 11.8） |
-| **长音频分割** | Silero VAD 自动检测语音段 |
+| **长音频智能切分** | Silero VAD 分段 + 强制 30s 子切片（防止模型溢出） |
 | **热词 (Hotwords)** | 支持热词偏置，提升特定词汇识别率 |
 | **语言强制** | 可指定语言（如 `"Korean"`, `"Chinese"`） |
 | **OpenAI 兼容** | 兼容 OpenAI Whisper API 调用方式 |
@@ -207,15 +207,23 @@ asr:
   provider: "cpu"         # "cpu" 或 "cuda"
   num_threads: 2
   feature_dim: 128        # Qwen3 专用，非 80！
-  max_total_len: 512
-  max_new_tokens: 128
+  max_total_len: 2048     # 512→2048（修复长音频截断，配合 30s 切片）
+  max_new_tokens: 256     # 128→256（支持更长句子）
   temperature: 0.000001
   hotwords: ""            # 逗号分隔的热词
 
 vad:
-  enabled: true           # 长音频自动 VAD 分割
-  threshold: 0.5
-  max_speech_duration: 30 # 每段最长 30 秒
+  enabled: true           # 长音频自动 VAD 分割（每请求新建实例）
+  threshold: 0.3          # 0.5→0.3（嘈杂环境更灵敏）
+  min_silence_duration: 1.0  # 0.25→1.0（按句子边界切分）
+  min_speech_duration: 0.5   # 0.25→0.5（过滤短噪声）
+
+processing:
+  max_chunk_duration: 30  # ★ 新增：强制子切片最长 30s
+  chunk_overlap: 0.0      # 不重叠（简单可靠）
+  preprocess:
+    normalize: true       # ★ 新增：音量归一化
+    highpass_cutoff: 80   # ★ 新增：80Hz 高通滤波（去低频噪音）
 ```
 
 ---

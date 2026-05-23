@@ -21,6 +21,7 @@ from typing import Optional, List, Tuple
 import numpy as np
 import soundfile as sf
 import librosa
+import scipy.signal as signal
 import sherpa_onnx
 
 from .models import Segment, RecognitionResult, ProcessingStats
@@ -48,7 +49,7 @@ class SpeechEngine:
     def __init__(self, config: dict):
         self.config = config
         self._recognizer: Optional[sherpa_onnx.OfflineRecognizer] = None
-        self._vad: Optional[sherpa_onnx.VoiceActivityDetector] = None
+        self._vad_config: Optional[sherpa_onnx.VadModelConfig] = None
         self._lock = threading.Lock()  # Serialize single-request processing
 
         self._init_asr()
@@ -110,10 +111,16 @@ class SpeechEngine:
         logger.info("Qwen3-ASR model loaded")
 
     def _init_vad(self):
-        """Load Silero VAD for speech segmentation (optional)."""
+        """Prepare VAD configuration (actual instance created per request).
+
+        VAD is RE-created for each call to _get_speech_segments() to prevent
+        internal state (silence history, speech-in-progress flag) from
+        contaminating the next request.
+        """
         vad_cfg = self.config.get("vad", {})
         if not vad_cfg.get("enabled", True):
             logger.info("VAD disabled by config")
+            self._vad_config = None
             return
 
         model_cfg = self.config["models"]
@@ -123,9 +130,10 @@ class SpeechEngine:
 
         if not vad_path.exists():
             logger.warning(f"VAD model not found at {vad_path}, VAD disabled")
+            self._vad_config = None
             return
 
-        logger.info(f"Loading VAD model: {vad_path}")
+        logger.info(f"VAD model: {vad_path}")
         vad_config = sherpa_onnx.VadModelConfig()
         vad_config.silero_vad.model = str(vad_path)
         vad_config.silero_vad.threshold = vad_cfg.get("threshold", 0.5)
@@ -140,11 +148,21 @@ class SpeechEngine:
         )
         vad_config.sample_rate = TARGET_SAMPLE_RATE
 
-        self._vad = sherpa_onnx.VoiceActivityDetector(
-            vad_config,
+        self._vad_config = vad_config
+        logger.info("VAD config ready (instance created per request)")
+
+    def _create_vad_instance(self) -> sherpa_onnx.VoiceActivityDetector:
+        """Create a fresh VAD instance for a single request.
+
+        Each call returns a new VoiceActivityDetector with clean internal
+        state. Caller MUST NOT cache the returned instance across requests.
+        """
+        if self._vad_config is None:
+            raise RuntimeError("VAD not configured")
+        return sherpa_onnx.VoiceActivityDetector(
+            self._vad_config,
             buffer_size_in_seconds=100,
         )
-        logger.info("VAD model loaded")
 
     # ------------------------------------------------------------------
     # Audio I/O
@@ -234,6 +252,33 @@ class SpeechEngine:
         return temp_path
 
     # ------------------------------------------------------------------
+    # Audio Preprocessing
+    # ------------------------------------------------------------------
+
+    def _preprocess(self, audio: np.ndarray, sr: int) -> np.ndarray:
+        """Apply optional audio preprocessing: normalize + highpass filter.
+
+        Controlled by config processing.preprocess section.
+        """
+        pre = self.config.get("processing", {}).get("preprocess", {})
+
+        # Volume normalization to [-1.0, 1.0]
+        if pre.get("normalize", True):
+            max_val = np.max(np.abs(audio))
+            if max_val > 1e-10:
+                audio = audio / max_val
+            logger.debug("Audio normalized")
+
+        # High-pass filter to remove low-frequency noise (e.g., fans, hum)
+        cutoff = pre.get("highpass_cutoff", 0)
+        if cutoff > 0 and sr > 2 * cutoff:
+            sos = signal.butter(4, cutoff, btype="highpass", fs=sr, output="sos")
+            audio = signal.sosfilt(sos, audio).astype(np.float32)
+            logger.debug(f"High-pass filter applied: {cutoff}Hz")
+
+        return audio
+
+    # ------------------------------------------------------------------
     # Core Processing
     # ------------------------------------------------------------------
 
@@ -258,6 +303,10 @@ class SpeechEngine:
 
             # Load and normalize
             audio, sr = self.load_audio(audio_path)
+
+            # Optional preprocessing: normalize + highpass filter
+            audio = self._preprocess(audio, sr)
+
             duration = len(audio) / sr
             logger.info(
                 f"Processing {audio_path}: {duration:.1f}s, "
@@ -276,6 +325,15 @@ class SpeechEngine:
             # Step 1: Get speech segments (VAD or full audio)
             segments = self._get_speech_segments(audio, sr)
             logger.info(f"Speech segments: {len(segments)}")
+            n_before = len(segments)
+
+            # Step 1b: Force-split long segments to fit model context window
+            segments = self._chunk_segments(segments)
+            if len(segments) != n_before:
+                logger.info(
+                    f"After chunking: {len(segments)} segments "
+                    f"(was {n_before})"
+                )
 
             # Step 2: Run Qwen3 ASR on each segment
             detected_lang = language if language else "unknown"
@@ -355,21 +413,31 @@ class SpeechEngine:
         """
         Get speech segments via VAD, or a single full-audio segment.
 
+        VAD instance is created fresh per call to prevent state
+        contamination across requests.
+
         Returns:
             [{"start": float, "end": float}, ...]
         """
-        if self._vad is not None:
-            return self._vad_segment(audio, sr)
+        if self._vad_config is not None:
+            try:
+                vad = self._create_vad_instance()
+                return self._vad_segment(audio, sr, vad)
+            except RuntimeError:
+                pass
         # No VAD → treat full audio as one segment
         duration = len(audio) / sr
         return [{"start": 0.0, "end": duration}]
 
-    def _vad_segment(self, audio: np.ndarray, sr: int) -> List[dict]:
+    def _vad_segment(self, audio: np.ndarray, sr: int, vad: sherpa_onnx.VoiceActivityDetector) -> List[dict]:
         """
         Silero VAD: detect speech segments, merge adjacent with small gap.
-        VAD is discarded after use — no caching.
+        Uses a fresh VAD instance (not cached across requests).
+
+        The VAD instance is NOT reused after this call returns — the
+        caller creates a new one per request to avoid state contamination.
         """
-        window_size = self._vad.config.silero_vad.window_size
+        window_size = vad.config.silero_vad.window_size
         segments = []
         started = False
         speech_start = 0.0
@@ -379,15 +447,15 @@ class SpeechEngine:
             window = audio[i : i + window_size]
             if len(window) < window_size:
                 window = np.pad(window, (0, window_size - len(window)))
-            self._vad.accept_waveform(window)
+            vad.accept_waveform(window)
 
             t = (i + window_size) / sr
 
-            if not started and self._vad.is_speech_detected():
+            if not started and vad.is_speech_detected():
                 started = True
                 speech_start = max(0, (i - window_size) / sr)
 
-            if started and not self._vad.is_speech_detected():
+            if started and not vad.is_speech_detected():
                 segments.append({
                     "start": round(speech_start, 3),
                     "end": round(t, 3),
@@ -434,6 +502,66 @@ class SpeechEngine:
                 f"(gap={gap_threshold}s)"
             )
         return merged
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Chunking — Safety guard against Qwen3-ASR finite context window
+    # ──────────────────────────────────────────────────────────────────────
+
+    def _chunk_segments(self, segments: List[dict]) -> List[dict]:
+        """
+        Force-split VAD segments that exceed max_chunk_duration.
+
+        This is the PRIMARY safety guard. Qwen3-ASR has a finite context
+        window (controlled by max_total_len). Even if VAD produces a clean
+        speech segment, it may be too long for the model (e.g., 10 minutes
+        of continuous speech with no pauses).
+
+        Strategy: if a segment is longer than max_chunk_duration, split it
+        evenly into N chunks, each ≤ max_chunk_duration. No overlap — the
+        risk of cutting a word at a clean 30s boundary is negligible, and
+        overlap would require deduplication logic.
+
+        Each chunk retains the original segment's start/end for correct
+        timestamp alignment.
+
+        Returns:
+            List of chunk dicts, always sorted by start time.
+        """
+        max_dur = self.config.get("processing", {}).get(
+            "max_chunk_duration", 30
+        )
+        if max_dur <= 0:
+            return segments  # chunking disabled
+
+        result: List[dict] = []
+        for seg in segments:
+            start = seg["start"]
+            end = seg["end"]
+            duration = end - start
+
+            if duration <= max_dur:
+                result.append(seg)
+                continue
+
+            # Split into evenly-sized chunks
+            n_chunks = int(np.ceil(duration / max_dur))
+            chunk_size = duration / n_chunks
+            logger.info(
+                f"Chunking {duration:.1f}s segment into {n_chunks} "
+                f"chunks of {chunk_size:.1f}s each"
+            )
+
+            for i in range(n_chunks):
+                cs = start + i * chunk_size
+                ce = start + (i + 1) * chunk_size
+                if i == n_chunks - 1:
+                    ce = end  # last chunk: exact end
+                result.append({
+                    "start": round(cs, 3),
+                    "end": round(ce, 3),
+                })
+
+        return result
 
     # ------------------------------------------------------------------
     # Helpers

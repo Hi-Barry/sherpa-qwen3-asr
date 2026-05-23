@@ -8,7 +8,7 @@ service:
 models:
   # Qwen3-ASR 0.6B int8 — downloaded by scripts/download_models.sh
   qwen3_asr_dir: "models/qwen3-asr"
-  # Silero VAD for long audio segmentation (optional)
+  # Silero VAD for speech segmentation (optional)
   vad_dir: "models/vad"
   vad_model_file: "silero_vad.onnx"
 
@@ -19,10 +19,16 @@ asr:
   num_threads: 2
   # Qwen3-ASR offline path uses feature_dim=128 (NOT 80 like SenseVoice/Whisper)
   feature_dim: 128
-  # Maximum KV cache sequence length
-  max_total_len: 512
-  # Maximum new tokens to generate per utterance
-  max_new_tokens: 128
+  # Maximum KV cache sequence length.
+  # Qwen3-ASR conv_frontend stride=4 → each encoder frame ≈ 40ms audio.
+  #   512 tokens ~ 20s (too small — was the root cause of long-audio crashes)
+  #  2048 tokens ~ 82s
+  #  4096 tokens ~ 164s
+  # With max_chunk_duration=30s below, 2048 is more than enough.
+  max_total_len: 2048
+  # Maximum new tokens to generate per utterance.
+  # Increased from 128 to 256 to handle longer sentences.
+  max_new_tokens: 256
   # Sampling parameters (very low temperature = deterministic)
   temperature: 0.000001  # = 1e-6
   top_p: 0.8
@@ -31,17 +37,44 @@ asr:
   hotwords: ""
 
 vad:
-  # Silero VAD — disable for very short audio (<30s) to skip overhead
+  # Silero VAD — enables speech/non-speech segmentation for long audio.
+  # VAD is RE-created for each request to prevent state contamination
+  # across requests (see engine.py _get_speech_segments).
   enabled: true
-  threshold: 0.5
-  min_speech_duration: 0.25      # seconds
-  min_silence_duration: 0.25     # seconds
-  max_speech_duration: 30        # max segment length (s) — capped by max_new_tokens
+  # VAD sensitivity threshold. Lower = more sensitive.
+  # 0.5 is standard; 0.3 recommended for noisy environments (office, lab).
+  threshold: 0.3
+  # Minimum duration (s) for a speech segment.
+  # Increased from 0.25 to 0.5 to filter out short noise bursts.
+  min_speech_duration: 0.5
+  # How long silence (s) must last to split into a new segment.
+  # Increased from 0.25 to 1.0 — splits at natural sentence boundaries
+  # rather than every short pause, producing fewer but longer segments.
+  min_silence_duration: 1.0
+  # Maximum VAD segment length (s). Segments longer than this are
+  # force-split by _chunk_segments() in engine.py.
+  max_speech_duration: 30
 
 processing:
   max_file_size: 52428800         # 50 MB max upload
   max_audio_duration: 3600        # 1 hour max
   temp_dir: "/tmp/sherpa-qwen3-asr"
+  # NEW: Force-split VAD segments into chunks ≤ this duration (seconds).
+  # This is the primary safety guard against Qwen3-ASR's finite context
+  # window. Each chunk is processed independently and results are merged.
+  # Recommended: 30s (matches Qwen3-ASR's designed operating range).
+  max_chunk_duration: 30
+  # NEW: Overlap between consecutive chunks (seconds). Prevents words
+  # from being cut in half at chunk boundaries. The overlapping region
+  # is deduplicated during merge.
+  chunk_overlap: 0.5
+  # NEW: Audio preprocessing options
+  preprocess:
+    # Normalize audio to [-1.0, 1.0] range
+    normalize: true
+    # High-pass filter cutoff (Hz). 0 = disabled.
+    # Typical: 80 (removes low-frequency hum/noise)
+    highpass_cutoff: 80
 
 logging:
   level: "INFO"
