@@ -16,11 +16,12 @@
 | **多语言 ASR** | 30 种语言 + 22 种中文方言（自动检测） |
 | **纯 CPU 推理** | ONNX int8 量化，无需 GPU |
 | **CUDA GPU 加速** | 可选 NVIDIA GPU 加速（CUDA 11.8） |
-| **长音频智能切分** | Silero VAD 分段 + 强制 30s 子切片（防止模型溢出） |
+| **长音频切分** | 强制 30s 子切片（防止模型溢出） |
 | **热词 (Hotwords)** | 支持热词偏置，提升特定词汇识别率 |
 | **语言强制** | 可指定语言（如 `"Korean"`, `"Chinese"`） |
 | **OpenAI 兼容** | 兼容 OpenAI Whisper API 调用方式 |
-| **全格式解码** | 内置 ffmpeg 回退 — 支持 M4A/AAC/MP3/OPUS/WEBM 等
+| **全格式解码** | 内置 ffmpeg 回退 — 支持 M4A/AAC/MP3/OPUS/WEBM 等 |
+| **后台队列** | ASR 请求串行处理，队列满时返回 429，不堆积连接 |
 
 ---
 
@@ -69,7 +70,6 @@ chmod +x scripts/download_models.sh
 
 下载内容：
 - **Qwen3-ASR 0.6B int8** (~1.5 GB) — 主 ASR 模型
-- **Silero VAD v5** (~2.2 MB) — 语音活动检测
 
 ### 4. 启动服务
 
@@ -123,6 +123,13 @@ curl http://localhost:8000/api/v1/health
   }
 }
 ```
+
+**错误码：**
+
+| 状态码 | 含义 |
+|--------|------|
+| `429` | 请求队列已满，稍后重试 |
+| `504` | 处理超时，音频过长或服务器繁忙 |
 
 ### `GET /api/v1/health`
 
@@ -212,19 +219,24 @@ asr:
   temperature: 0.000001
   hotwords: ""            # 逗号分隔的热词
 
-vad:
-  enabled: true           # 长音频自动 VAD 分割（每请求新建实例）
-  threshold: 0.3          # 0.5→0.3（嘈杂环境更灵敏）
-  min_silence_duration: 1.0  # 0.25→1.0（按句子边界切分）
-  min_speech_duration: 0.5   # 0.25→0.5（过滤短噪声）
+queue:
+  max_size: 10            # ★ 请求队列最大深度（满则 429）
+  timeout: 300            # ★ 单请求超时秒数
 
 processing:
-  max_chunk_duration: 30  # ★ 新增：强制子切片最长 30s
-  chunk_overlap: 0.0      # 不重叠（简单可靠）
+  max_chunk_duration: 30  # ★ 强制子切片最长 30s
   preprocess:
-    normalize: true       # ★ 新增：音量归一化
-    highpass_cutoff: 80   # ★ 新增：80Hz 高通滤波（去低频噪音）
+    normalize: true       # 音量归一化
+    highpass_cutoff: 80   # 80Hz 高通滤波（去低频噪音）
 ```
+
+### 队列说明
+
+ASR 处理是 CPU/GPU 密集型的，所有请求通过一个后台队列串行处理：
+
+- **队列深度：** `queue.max_size`（默认 10），超过此限制的请求立即返回 **429**
+- **超时保护：** `queue.timeout`（默认 300s），超过此时间返回 **504**
+- **事件循环：** ASR 在独立线程池中执行，健康检查等轻量请求不受影响
 
 ---
 

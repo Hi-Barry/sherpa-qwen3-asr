@@ -154,6 +154,8 @@ async def create_transcription(
         raise HTTPException(status_code=500, detail=f"Model not found: {e}")
     except ValueError as e:
         raise HTTPException(status_code=413, detail=str(e))
+    except HTTPException:
+        raise
     except RuntimeError as e:
         logger.error(f"Processing error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

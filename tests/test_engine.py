@@ -1,8 +1,8 @@
 """
-Tests for SpeechEngine — Qwen3 ASR + VAD.
+Tests for SpeechEngine — Qwen3 ASR transcription.
 
 Tests are split into:
-  - Unit tests: no model required (audio loading, segment merging)
+  - Unit tests: no model required (audio loading)
   - Integration tests: require models to be downloaded (auto-skipped otherwise)
 """
 import sys
@@ -46,20 +46,18 @@ def engine() -> SpeechEngine:
     """Load real Qwen3 model (skipped if models not downloaded)."""
     project_root = Path(__file__).parent.parent
     config_path = project_root / "config" / "config.yaml"
-    
+
     import yaml
     with open(config_path) as f:
         config = yaml.safe_load(f)
-    
+
     # Resolve relative paths from project root
     models_dir = project_root / config["models"]["qwen3_asr_dir"]
     if not models_dir.exists():
         pytest.skip(f"Qwen3 model not found at {models_dir}. Run scripts/download_models.sh first.")
-    
-    vad_dir = project_root / config["models"]["vad_dir"]
+
     config["models"]["qwen3_asr_dir"] = str(models_dir)
-    config["models"]["vad_dir"] = str(vad_dir)
-    
+
     return SpeechEngine(config)
 
 
@@ -123,65 +121,6 @@ class TestLoadAudio:
         assert ".flac" in ALLOWED_EXTENSIONS
         assert ".ogg" in ALLOWED_EXTENSIONS
         assert ".m4a" in ALLOWED_EXTENSIONS
-
-
-# ======================================================================
-# Tests: Segment Merging (no model needed)
-# ======================================================================
-
-class TestMergeSegments:
-    def test_empty(self):
-        assert SpeechEngine._merge_adjacent_segments([]) == []
-
-    def test_single(self):
-        segs = [{"start": 0.0, "end": 1.0}]
-        merged = SpeechEngine._merge_adjacent_segments(segs)
-        assert len(merged) == 1
-        assert merged[0]["start"] == 0.0
-        assert merged[0]["end"] == 1.0
-
-    def test_merge_adjacent(self):
-        segs = [
-            {"start": 0.0, "end": 1.0},
-            {"start": 1.2, "end": 2.0},  # gap=0.2 ≤ 0.5
-        ]
-        merged = SpeechEngine._merge_adjacent_segments(segs)
-        assert len(merged) == 1
-        assert merged[0]["start"] == 0.0
-        assert merged[0]["end"] == 2.0
-
-    def test_no_merge_distant(self):
-        segs = [
-            {"start": 0.0, "end": 1.0},
-            {"start": 2.0, "end": 3.0},  # gap=1.0 > 0.5
-        ]
-        merged = SpeechEngine._merge_adjacent_segments(segs)
-        assert len(merged) == 2
-
-    def test_multi_merge(self):
-        segs = [
-            {"start": 0.0, "end": 0.5},
-            {"start": 0.7, "end": 1.2},
-            {"start": 1.5, "end": 2.0},
-        ]
-        merged = SpeechEngine._merge_adjacent_segments(segs)
-        assert len(merged) == 1
-        assert merged[0]["start"] == 0.0
-        assert merged[0]["end"] == 2.0
-
-    def test_complex(self):
-        segs = [
-            {"start": 0.0, "end": 1.0},
-            {"start": 1.3, "end": 2.0},   # merged
-            {"start": 5.0, "end": 6.0},   # gap=3.0, separate
-            {"start": 6.2, "end": 7.0},   # merged with 5.0-6.0
-        ]
-        merged = SpeechEngine._merge_adjacent_segments(segs)
-        assert len(merged) == 2
-        assert merged[0]["start"] == 0.0
-        assert merged[0]["end"] == 2.0
-        assert merged[1]["start"] == 5.0
-        assert merged[1]["end"] == 7.0
 
 
 # ======================================================================

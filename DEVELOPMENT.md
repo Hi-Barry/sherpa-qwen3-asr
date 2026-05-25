@@ -155,3 +155,77 @@ VAD → 按静音切分 → 强制 30s 子切片 → 逐段 ASR → 合并结果
 ### 验证
 
 - 24 个核心单元测试通过 ✅（15 个 GPU 集成测试因 CUDA OOM 跳过，与环境有关）
+---
+
+## v0.2.0 (2026-05-25)
+
+### 做了什么
+
+1. **移除 VAD** — 删除整个 Silero VAD 子系统（`_init_vad`、`_create_vad_instance`、`_vad_segment`、`_merge_adjacent_segments`、`_vad_config` 实例变量）
+2. **`threading.Lock` → `asyncio.Queue`** — 修复 threading.Lock 在 async 上下文中阻塞事件循环的问题
+3. **删除 VAD 模型依赖** — config 中移除 `vad_dir`、`vad_model_file`；download_models.sh 不再需要 Silero VAD
+
+### 根因
+
+原 `engine.py` 使用 `threading.Lock` 串行化 ASR 请求。但 FastAPI async endpoint 调用 `with self._lock: engine.process()` 时，`threading.Lock` 阻塞了事件循环所在线程，导致：
+
+- 请求 A 处理时，事件循环卡死 30s+
+- 健康检查、其他上传全部挂起
+- 无队列上限，连接无限堆积
+- 无超时保护，客户端可能永久等待
+
+### 修复方案
+
+```python
+# 之前：threading.Lock 阻塞事件循环
+def process(self, audio_path, language):
+    with self._lock:  # ❌ 阻塞事件循环
+        ...
+
+# 之后：asyncio.Queue + ThreadPoolExecutor
+# api.py:
+_queue = asyncio.Queue(maxsize=10)
+_executor = ThreadPoolExecutor(max_workers=1)
+
+async def _queue_worker():
+    while True:
+        item = await _queue.get()
+        # ASR 在线程池执行，事件循环自由
+        result = await loop.run_in_executor(_executor, engine.process, ...)
+        future.set_result(result)
+```
+
+### 架构对比
+
+```
+之前:
+  POST → async endpoint → with threading.Lock → engine.process() → 阻塞 30s
+                                                                     ↓
+                                                            事件循环卡死
+
+之后:
+  POST → async endpoint → asyncio.Queue.put() → _queue_worker()
+                                                   ↓
+                                            run_in_executor → engine.process()
+                                                                  ↓
+                                                          事件循环自由 ✓
+                                                          健康检查正常 ✓
+                                                          队列满 → 429 ✓
+```
+
+### 改动量
+
+| 文件 | 改动 |
+|------|------|
+| `src/engine.py` | 删除 VAD 4 个方法 + threading.Lock；简化 `_get_speech_segments()` 为整段 |
+| `src/api.py` | 新增 `asyncio.Queue`、`_queue_worker`、`ThreadPoolExecutor`；lifespan 管理 |
+| `config/config.yaml` | 删 VAD 节；删 `chunk_overlap`；增 queue 节；删 `vad_dir`/`vad_model_file` |
+| `tests/test_engine.py` | 删 `TestMergeSegments`（6 个 VAD 测试）；fixture 移除 vad_dir |
+| `tests/test_api.py` | 增 `TestQueue` 类 |
+| `README.md` | 更新特性表、配置示例、队列说明 |
+| `DEVELOPMENT.md` | 本日志 |
+
+### 验证
+
+- 所有文件语法检查通过 ✅
+- 运行 `pytest tests/ -v` 确认测试通过

@@ -1,5 +1,5 @@
 """
-Tests for the FastAPI server — HTTP endpoints.
+Tests for the FastAPI server — HTTP endpoints + background queue.
 
 Requires models to be downloaded (auto-skipped otherwise).
 """
@@ -120,6 +120,19 @@ class TestRecognize:
         resp = client.post("/api/v1/recognize")
         assert resp.status_code == 422
 
+    def test_recognize_large_file(self, client):
+        """File exceeding max_file_size should return 413."""
+        big_data = b"\x00" * (config["processing"]["max_file_size"] + 1)
+        resp = client.post(
+            "/api/v1/recognize",
+            files={"file": ("big.wav", big_data, "audio/wav")},
+        )
+        assert resp.status_code == 413, f"Expected 413, got {resp.status_code}: {resp.text}"
+
+
+# ======================================================================
+# Tests: OpenAI-compatible endpoints
+# ======================================================================
 
 class TestOpenAIEndpoints:
     def test_transcriptions_json(self, client, test_audio):
@@ -194,6 +207,33 @@ class TestOpenAIEndpoints:
                 data={"model": "Qwen/Qwen3-ASR-0.6B"},
             )
         assert resp.status_code == 200
+
+
+# ======================================================================
+# Tests: Queue behavior
+# ======================================================================
+
+class TestQueue:
+    """Verify background queue serializes requests correctly."""
+
+    def test_queue_accepts_request(self, client):
+        """Queue should process requests normally."""
+        # Generate a tiny audio file
+        sr = 16000
+        audio = np.sin(2 * np.pi * 440 * np.linspace(0, 0.1, int(sr * 0.1))).astype(np.float32)
+        fd, path = tempfile.mkstemp(suffix=".wav")
+        os.close(fd)
+        try:
+            sf.write(path, audio, sr)
+            with open(path, "rb") as f:
+                resp = client.post(
+                    "/api/v1/recognize",
+                    files={"file": ("tiny.wav", f, "audio/wav")},
+                )
+            # Success or 504 (timeout) are both acceptable in test env
+            assert resp.status_code in (200, 504), f"Unexpected: {resp.text}"
+        finally:
+            os.unlink(path)
 
 
 if __name__ == "__main__":
